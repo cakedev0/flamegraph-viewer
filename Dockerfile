@@ -1,13 +1,13 @@
-# ── Stage 1: build inferno-flamegraph from source ────────────────────────────
-FROM rust:slim AS builder
-
-RUN cargo install inferno
-
-# ── Stage 2: Python runtime ───────────────────────────────────────────────────
 FROM python:3.12-slim
 
-# Copy the inferno-flamegraph binary produced in stage 1
-COPY --from=builder /usr/local/cargo/bin/inferno-flamegraph /usr/local/bin/inferno-flamegraph
+# Install Perl and flamegraph.pl (converts py-spy folded-stack traces to SVG)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends perl curl \
+    && curl -fsSL \
+       "https://raw.githubusercontent.com/brendangregg/FlameGraph/master/flamegraph.pl" \
+       -o /usr/local/bin/flamegraph.pl \
+    && chmod +x /usr/local/bin/flamegraph.pl \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 

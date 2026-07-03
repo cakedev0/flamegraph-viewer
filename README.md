@@ -4,8 +4,9 @@ Online flamegraph viewer for compressed py-spy traces.
 
 Given a URL that points to a `.raw.gz` py-spy profile, the service downloads,
 decompresses, and converts it to an interactive SVG flamegraph using
-[inferno-flamegraph](https://github.com/jonhoo/inferno) — the same library
-used by py-spy internally.
+[flamegraph.pl](https://github.com/brendangregg/FlameGraph) — Brendan Gregg's
+original flamegraph script that reads the folded-stack format written by
+`py-spy record --format raw`.
 
 ## Usage
 
@@ -35,12 +36,14 @@ GET /healthz  →  200 OK
 ### Prerequisites
 
 - Python 3.12+
-- Rust / `cargo` (to build `inferno-flamegraph`)
+- Perl (usually pre-installed on macOS/Linux)
 
-### Install inferno-flamegraph
+### Install flamegraph.pl
 
 ```bash
-cargo install inferno
+curl -fsSL https://raw.githubusercontent.com/brendangregg/FlameGraph/master/flamegraph.pl \
+  -o /usr/local/bin/flamegraph.pl
+chmod +x /usr/local/bin/flamegraph.pl
 ```
 
 ### Run the app
@@ -110,7 +113,7 @@ export PROJECT_ID=$(gcloud config get-value project)
 export REGION=<REGION>          # e.g. europe-west1
 export IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/flamegraph-viewer/app"
 
-# Build (multi-stage: compiles inferno from Rust source — takes ~5 min first time)
+# Build
 docker build -t "${IMAGE}:latest" .
 
 # Push
@@ -202,14 +205,14 @@ Browser / curl
     ▼
 Flask app (gunicorn, 2 workers)
     │
-    ├─ requests.get(url)          — download compressed profile
-    ├─ gzip.decompress(data)      — decompress to folded-stack format
-    └─ inferno-flamegraph (stdin) — render SVG
+    ├─ requests.get(url)         — download compressed profile
+    ├─ gzip.decompress(data)     — decompress to folded-stack format
+    └─ perl flamegraph.pl (stdin) — render SVG
     │
     └─ Response: image/svg+xml
 ```
 
-`inferno-flamegraph` reads the
+`flamegraph.pl` reads the
 [folded stack format](https://github.com/brendangregg/FlameGraph#2-fold-stacks)
 that py-spy writes when `--format raw` is used, and produces a self-contained
 interactive SVG.

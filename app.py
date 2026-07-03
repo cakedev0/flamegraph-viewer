@@ -81,14 +81,14 @@ def flamegraph():
 
     try:
         result = subprocess.run(
-            ["inferno-flamegraph"],
+            ["perl", "/usr/local/bin/flamegraph.pl"],
             input=raw_data,
             capture_output=True,
             timeout=120,
         )
     except FileNotFoundError:
         return Response(
-            "inferno-flamegraph binary not found on PATH",
+            "flamegraph.pl or perl not found on PATH",
             status=500,
             mimetype="text/plain",
         )
@@ -101,7 +101,7 @@ def flamegraph():
 
     if result.returncode != 0:
         return Response(
-            f"inferno-flamegraph failed (exit {result.returncode}):\n"
+            f"flamegraph.pl failed (exit {result.returncode}):\n"
             + result.stderr.decode(errors="replace"),
             status=500,
             mimetype="text/plain",
