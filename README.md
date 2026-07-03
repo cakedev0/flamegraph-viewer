@@ -58,6 +58,25 @@ Then open:
 http://localhost:8080/?url=https://...
 ```
 
+## JSON viewer
+
+The service can also proxy JSON and `.json.gz` files, including GitHub
+LFS-backed raw files, and return them with JSON-friendly headers:
+
+```
+GET https://<service-url>/json?url=<encoded-json-url>
+```
+
+**Example**
+
+```
+https://my-app-id.region.run.app/json?url=https://github.com/probabl-ai/scikit-learn-benchmarks/raw/refs/heads/refactor/results/records/sklearn_ExtraTreesClassifier_make_trees_clsf_data_0947b_20260702T202049625116Z.json
+```
+
+The response validates that the downloaded content is valid JSON, transparently
+decompresses gzip input when needed, and returns `Content-Type:
+application/json`.
+
 ---
 
 ## Deployment to GCP Cloud Run
