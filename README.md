@@ -91,23 +91,22 @@ gcloud services enable \
 ```bash
 gcloud artifacts repositories create flamegraph-viewer \
   --repository-format=docker \
-  --location=<REGION> \
+  --location=europe-west1 \
   --description="flamegraph-viewer images"
 ```
 
-Replace `<REGION>` with your preferred region, e.g. `europe-west1`.
 
 ### 4 — Configure Docker to use Artifact Registry
 
 ```bash
-gcloud auth configure-docker <REGION>-docker.pkg.dev
+gcloud auth configure-docker europe-west1-docker.pkg.dev
 ```
 
 ### 5 — Build and push the image
 
 ```bash
 export PROJECT_ID=$(gcloud config get-value project)
-export REGION=<REGION>          # e.g. europe-west1
+export REGION=europe-west1
 export IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/flamegraph-viewer/app"
 
 # Build (multi-stage: compiles inferno from Rust source — takes ~5 min first time)
@@ -134,8 +133,11 @@ gcloud run deploy flamegraph-viewer \
   --port 8080 \
   --cpu 1 \
   --memory 512Mi \
-  --timeout 300 \
-  --concurrency 10
+  --timeout 180 \
+  --concurrency 2 \
+  --min-instances 0 \
+  --max-instances 1 \
+  --cpu-throttling
 ```
 
 Cloud Run will print the service URL on success:
@@ -187,8 +189,8 @@ steps:
       - --region=$_REGION
       - --platform=managed
 substitutions:
-  _IMAGE: <REGION>-docker.pkg.dev/<PROJECT_ID>/flamegraph-viewer/app
-  _REGION: <REGION>
+  _IMAGE: europe-west1-docker.pkg.dev/<PROJECT_ID>/flamegraph-viewer/app
+  _REGION: europe-west1
 ```
 
 ---
