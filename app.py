@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import subprocess
+import tempfile
 from urllib.parse import urlparse
 
 import requests
@@ -50,6 +51,85 @@ def _download_bytes(url: str, *, description: str) -> tuple[bytes | None, Respon
         )
 
 
+def _is_cprofile_url(url: str) -> bool:
+    return urlparse(url).path.lower().endswith(".prof.gz")
+
+
+def _run_inferno_flamegraph(folded_stacks: bytes) -> tuple[bytes | None, Response | None]:
+    try:
+        result = subprocess.run(
+            ["inferno-flamegraph"],
+            input=folded_stacks,
+            capture_output=True,
+            timeout=120,
+        )
+    except FileNotFoundError:
+        return None, Response(
+            "inferno-flamegraph binary not found on PATH",
+            status=500,
+            mimetype="text/plain",
+        )
+    except subprocess.TimeoutExpired:
+        return None, Response(
+            "Flamegraph generation timed out",
+            status=504,
+            mimetype="text/plain",
+        )
+
+    if result.returncode != 0:
+        return None, Response(
+            f"inferno-flamegraph failed (exit {result.returncode}):\n"
+            + result.stderr.decode(errors="replace"),
+            status=500,
+            mimetype="text/plain",
+        )
+
+    return result.stdout, None
+
+
+def _render_cprofile_flamegraph(profile_data: bytes) -> tuple[bytes | None, Response | None]:
+    profile_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".prof", delete=False) as profile_file:
+            profile_path = profile_file.name
+            profile_file.write(profile_data)
+
+        try:
+            folded = subprocess.run(
+                ["flameprof", "--format", "log", profile_path],
+                capture_output=True,
+                timeout=120,
+            )
+        except FileNotFoundError:
+            return None, Response(
+                "flameprof binary not found on PATH",
+                status=500,
+                mimetype="text/plain",
+            )
+        except subprocess.TimeoutExpired:
+            return None, Response(
+                "cProfile conversion timed out",
+                status=504,
+                mimetype="text/plain",
+            )
+
+        if folded.returncode != 0:
+            return None, Response(
+                f"flameprof failed (exit {folded.returncode}):\n"
+                + folded.stderr.decode(errors="replace"),
+                status=422,
+                mimetype="text/plain",
+            )
+
+        return _run_inferno_flamegraph(folded.stdout)
+    finally:
+        if profile_path is not None:
+            try:
+                os.unlink(profile_path)
+            except FileNotFoundError:
+                pass
+
+
 @app.route("/healthz")
 def healthz():
     return Response("ok", status=200, mimetype="text/plain")
@@ -87,35 +167,15 @@ def flamegraph():
             mimetype="text/plain",
         )
 
-    try:
-        result = subprocess.run(
-            ["inferno-flamegraph"],
-            input=raw_data,
-            capture_output=True,
-            timeout=120,
-        )
-    except FileNotFoundError:
-        return Response(
-            "inferno-flamegraph binary not found on PATH",
-            status=500,
-            mimetype="text/plain",
-        )
-    except subprocess.TimeoutExpired:
-        return Response(
-            "Flamegraph generation timed out",
-            status=504,
-            mimetype="text/plain",
-        )
+    if _is_cprofile_url(url):
+        svg, error_response = _render_cprofile_flamegraph(raw_data)
+    else:
+        svg, error_response = _run_inferno_flamegraph(raw_data)
 
-    if result.returncode != 0:
-        return Response(
-            f"inferno-flamegraph failed (exit {result.returncode}):\n"
-            + result.stderr.decode(errors="replace"),
-            status=500,
-            mimetype="text/plain",
-        )
+    if error_response is not None:
+        return error_response
 
-    return Response(result.stdout, mimetype="image/svg+xml")
+    return Response(svg, mimetype="image/svg+xml")
 
 
 @app.route("/json")

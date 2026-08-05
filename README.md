@@ -1,11 +1,17 @@
 # flamegraph-viewer
 
-Online flamegraph viewer for compressed py-spy traces.
+Online flamegraph viewer for compressed py-spy and cProfile traces.
 
-Given a URL that points to a `.raw.gz` py-spy profile, the service downloads,
-decompresses, and converts it to an interactive SVG flamegraph using
-[inferno-flamegraph](https://github.com/jonhoo/inferno) — the same library
-used by py-spy internally.
+Given a URL that points to a compressed profile, the service downloads,
+decompresses, and converts it to an interactive SVG flamegraph.
+
+- `.raw.gz` py-spy folded-stack profiles are rendered directly with
+  [inferno-flamegraph](https://github.com/jonhoo/inferno), the same library
+  used by py-spy internally.
+- `.prof.gz` cProfile stats are converted to folded stacks with
+  [flameprof](https://github.com/baverman/flameprof), then rendered with
+  `inferno-flamegraph` so the returned SVG keeps inferno's zoom/search
+  interactivity.
 
 ## Usage
 
@@ -21,6 +27,12 @@ https://my-app-id.region.run.app/?url=https://github.com/probabl-ai/scikit-learn
 
 The response is an `image/svg+xml` document that can be opened directly in a
 browser or embedded in an `<img>` / `<object>` tag.
+
+The same endpoint also accepts gzip-compressed cProfile stats:
+
+```
+https://my-app-id.region.run.app/?url=https://example.com/profile.prof.gz
+```
 
 ### Health check
 
@@ -42,6 +54,8 @@ GET /healthz  →  200 OK
 ```bash
 cargo install inferno
 ```
+
+`flameprof` is installed from `requirements.txt`.
 
 ### Run the app
 
@@ -224,16 +238,20 @@ Browser / curl
 Flask app (gunicorn, 2 workers)
     │
     ├─ requests.get(url)          — download compressed profile
-    ├─ gzip.decompress(data)      — decompress to folded-stack format
-    └─ inferno-flamegraph (stdin) — render SVG
+    ├─ gzip.decompress(data)      — decompress profile
+    ├─ .raw.gz                    — use folded-stack data directly
+    ├─ .prof.gz                   — flameprof --format log
+    └─ inferno-flamegraph (stdin) — render interactive SVG
     │
     └─ Response: image/svg+xml
 ```
 
 `inferno-flamegraph` reads the
 [folded stack format](https://github.com/brendangregg/FlameGraph#2-fold-stacks)
-that py-spy writes when `--format raw` is used, and produces a self-contained
-interactive SVG.
+that py-spy writes when `--format raw` is used. For cProfile stats, `flameprof`
+creates equivalent folded-stack input first. `flameprof`'s own SVG output is
+mostly hover-only; routing its folded-stack output through inferno gives the
+same self-contained interactive SVG for both supported profile formats.
 
 ---
 
