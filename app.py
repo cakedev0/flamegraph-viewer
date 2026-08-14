@@ -1,11 +1,15 @@
 import gzip
+import io
 import json
 import logging
 import os
+import pstats
 import subprocess
 import tempfile
+from collections import Counter
 from urllib.parse import urlparse
 
+import flameprof
 import requests
 from flask import Flask, Response, request
 
@@ -87,6 +91,71 @@ def _run_inferno_flamegraph(folded_stacks: bytes) -> tuple[bytes | None, Respons
     return result.stdout, None
 
 
+def _cprofile_stats_to_folded_stacks(stats: dict) -> bytes:
+    funcs, calls = flameprof.calc_callers(stats)
+    blocks = []
+    block_counts = Counter()
+
+    def _counts(parent, visited):
+        for child in funcs[parent]["calls"]:
+            key = (parent, child)
+            block_counts[key] += 1
+            if block_counts[key] < 2 and key not in visited:
+                _counts(child, visited | {key})
+
+    maxw = funcs["root"]["stat"][3] * 1.0
+    if maxw <= 0:
+        return b""
+
+    def _calc(parent, timings, origin, visited, trace=(), pccnt=1, pblock=None):
+        childs = funcs[parent]["calls"]
+        _, _, ptt, ptc = timings
+        fchilds = sorted(
+            (
+                (func, funcs[func], calls[(parent, func)], max(block_counts[(parent, func)], pccnt))
+                for func in childs
+            ),
+            key=lambda row: row[0],
+        )
+
+        gchilds = [row for row in fchilds if row[3] == 1]
+        bchilds = [row for row in fchilds if row[3] > 1]
+        if bchilds:
+            gctc = sum(row[2][3] for row in gchilds)
+            bctc = sum(row[2][3] for row in bchilds)
+            rest = ptc - ptt - gctc
+            factor = rest / bctc if bctc > 0 else 1
+            bchilds = [
+                (
+                    func,
+                    ffunc,
+                    (round(cc * factor), round(nc * factor), tt * factor, tc * factor),
+                    ccnt,
+                )
+                for func, ffunc, (cc, nc, tt, tc), ccnt in bchilds
+            ]
+
+        for child, _, (cc, nc, tt, tc), ccnt in gchilds + bchilds:
+            if tc / maxw > flameprof.DEFAULT_THRESHOLD / 100:
+                ckey = (parent, child)
+                ctrace = trace + (child,)
+                block = {"trace": ctrace, "ww": tt}
+                blocks.append(block)
+                if ckey not in visited:
+                    _calc(child, (cc, nc, tt, tc), origin, visited | {ckey}, ctrace, ccnt, block)
+            elif pblock:
+                pblock["ww"] += tc
+
+            origin += tc
+
+    _counts("root", set())
+    _calc("root", (1, 1, maxw, maxw), 0, set())
+
+    folded = io.StringIO()
+    flameprof.render_fg(blocks, flameprof.DEFAULT_LOG_MULT, folded)
+    return folded.getvalue().encode()
+
+
 def _render_cprofile_flamegraph(profile_data: bytes) -> tuple[bytes | None, Response | None]:
     profile_path = None
     try:
@@ -95,33 +164,23 @@ def _render_cprofile_flamegraph(profile_data: bytes) -> tuple[bytes | None, Resp
             profile_file.write(profile_data)
 
         try:
-            folded = subprocess.run(
-                ["flameprof", "--format", "log", profile_path],
-                capture_output=True,
-                timeout=120,
-            )
-        except FileNotFoundError:
-            return None, Response(
-                "flameprof binary not found on PATH",
-                status=500,
-                mimetype="text/plain",
-            )
-        except subprocess.TimeoutExpired:
+            stats = pstats.Stats(profile_path).stats
+            folded = _cprofile_stats_to_folded_stacks(stats)
+        except TimeoutError:
             return None, Response(
                 "cProfile conversion timed out",
                 status=504,
                 mimetype="text/plain",
             )
-
-        if folded.returncode != 0:
+        except Exception as exc:
+            logger.warning("cProfile conversion failed for %s: %s", profile_path, exc)
             return None, Response(
-                f"flameprof failed (exit {folded.returncode}):\n"
-                + folded.stderr.decode(errors="replace"),
+                "Failed to convert cProfile stats",
                 status=422,
                 mimetype="text/plain",
             )
 
-        return _run_inferno_flamegraph(folded.stdout)
+        return _run_inferno_flamegraph(folded)
     finally:
         if profile_path is not None:
             try:
