@@ -175,7 +175,7 @@ def _render_cprofile_flamegraph(profile_data: bytes) -> tuple[bytes | None, Resp
         except Exception as exc:
             logger.warning("cProfile conversion failed for %s: %s", profile_path, exc)
             return None, Response(
-                f"Failed to convert cProfile stats:\n{exc}",
+                "Failed to convert cProfile stats",
                 status=422,
                 mimetype="text/plain",
             )
